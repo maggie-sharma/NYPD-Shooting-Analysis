@@ -1,0 +1,179 @@
+---
+title: "NYPD Shooting"
+author: "Anonymous Learner"
+date: "2025-01-24"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+
+```{r setup, include=FALSE}
+library(tidyverse)
+```
+
+# NYPD Shooting
+
+This dataset looks at historic NYPD shooting records. Make sure to install and run the tidyverse package.
+
+## Purpose
+
+The purpose of this data analysis is to look at historic shooting data in NYPD, specifically looking at NY boroughs and demographics of the perpetrator of the shootings. 
+
+```{r NYPD}
+
+url<-"https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+NYPD_shooting<-read_csv(url,show_col_types = FALSE)
+
+```
+
+## Tidying the Data
+```{r, echo=FALSE}
+# My old way of formatting date
+#NYPD_shooting$OCCUR_DATE<-as.Date(NYPD_shooting$OCCUR_DATE)
+#New way of using lubridate to format
+```
+
+
+```{r pressure, echo=TRUE}
+#Change OCCUR_DATE from character to date,Change race, sex, and age to factor, and remove longitude/latitude columns as those will not be used in this analysis.  
+NYPD<- NYPD_shooting %>% mutate(OCCUR_DATE= mdy(OCCUR_DATE)) %>% mutate(PERP_RACE= as.factor(PERP_RACE)) %>% mutate(PERP_SEX=as.factor(PERP_SEX)) %>% mutate(PERP_AGE_GROUP=as.factor(PERP_AGE_GROUP)) %>% select (-c(X_COORD_CD, Y_COORD_CD, Latitude, Longitude, Lon_Lat,))
+```
+There are some missing values for Location of occurrence, age, sex, and race, but I do not want to remove these incidences. I will include the "Not reported" category as needed throughout my analysis and include "when location was known," or similar to represent missing data. 
+```{r, echo=FALSE}
+summary(NYPD)
+```
+
+
+## Analyzing the Data
+First, I want to calculate the totals by each NY borough by date. 
+```{r}
+#Number of Incidents by Boro by Date
+By_Boro<- NYPD_shooting %>% 
+  mutate(OCCUR_DATE= mdy(OCCUR_DATE)) %>%  
+  group_by(BORO,OCCUR_DATE) %>%
+  summarize(SHOOTINGS=n(), .groups="drop")
+
+head (By_Boro)
+  
+```
+Next, I will sum number of incidences in each boro by year from 2006-2023.
+
+```{r}
+Totals_by_Boro<-By_Boro %>%
+  mutate(YEAR= year(OCCUR_DATE)) %>%
+  group_by(BORO,YEAR) %>%
+  summarize(TOTAL_SHOOTINGS=sum(SHOOTINGS, na.rm=TRUE)) %>%
+  #select(BORO, OCCUR_DATE,TOTAL_SHOOTINGS) %>%
+  ungroup()
+head(Totals_by_Boro)
+```
+## Visualizing the Data
+Below is a graph of shooting incidences over time by each borough. 
+
+```{r}
+Totals_by_Boro %>%
+  ggplot(aes(x=YEAR, y=TOTAL_SHOOTINGS, group=BORO, color=BORO))+
+  geom_line(linewidth=1.2)+
+  theme(axis.text.x=element_text(angle=90), legend.background=element_rect(fill="darkgray"),
+        legend.title=element_text(size=12))+
+  scale_x_continuous(breaks=Totals_by_Boro$YEAR)+
+  labs(title="Number of Shootings in NYC by Borough",y="Number of Shootings", x="Time")
+```
+<br>
+
+## Modeling
+Polynomial Regression
+
+```{r}
+Boro_MOD<- Totals_by_Boro %>% mutate(BORO= as.factor(BORO))
+mod<- lm(TOTAL_SHOOTINGS~poly(YEAR,2)+BORO, data=Boro_MOD)
+summary(mod)
+
+ggplot(Boro_MOD, aes(x=YEAR, y=TOTAL_SHOOTINGS, color=BORO))+
+  geom_point() +
+  stat_smooth(method="lm", formula=y ~poly(x,2), se=FALSE)+
+  facet_wrap(~BORO)+
+  labs(title="Polynomial Regression By Borough",x="Year",y="Total Shootings")+
+  theme_minimal()
+```
+
+## Further Analysis
+We can see that Brooklyn has the highest amounts of shooting incidents. Let's look at that boro more closely.
+```{r}
+Brooklyn<- NYPD_shooting %>% 
+  filter(BORO== "BROOKLYN") %>%
+  mutate(OCCUR_DATE= mdy(OCCUR_DATE)) %>%  
+  group_by(PERP_SEX,PERP_RACE, PERP_AGE_GROUP,OCCUR_DATE) %>%
+  mutate(OCCUR_DATE= year(OCCUR_DATE))%>%
+  mutate(PERP_RACE= as.factor(PERP_RACE)) %>% mutate(PERP_SEX=as.factor(PERP_SEX)) %>% mutate(PERP_AGE_GROUP=as.factor(PERP_AGE_GROUP)) %>%
+  #summarize(INCIDENT_KEY= n_distinct(INCIDENT_KEY)) %>%
+  select(PERP_SEX,PERP_RACE, PERP_AGE_GROUP,OCCUR_DATE) %>%
+  ungroup()
+head(Brooklyn)
+
+```
+```{r}
+Brooklyn<- NYPD_shooting %>% 
+  filter(BORO== "BROOKLYN")
+  #mutate(OCCUR_DATE= mdy(OCCUR_DATE)) %>%  
+  #mutate(YEAR= year(OCCUR_DATE)) 
+  
+Brooklyn_Summary<-Brooklyn %>%
+  group_by(PERP_SEX,PERP_RACE, PERP_AGE_GROUP) %>%
+  summarize(SHOOTINGS=n(), .groups="drop")
+
+```
+
+Now that I have all of Brooklyn's shooting incidents by year and perpetrator demographics, I want to look at who is perpetrating shootings in Brooklyn.
+
+## Perpetrator Sex
+```{r}
+table(Brooklyn$PERP_SEX, useNA="ifany")
+```
+Out of 11,346 shooting incidents in Brooklyn, 5,813 were perpetrated by males. (Note that there are 4,738 unknown/blank values)
+
+## Perpetrator Age
+```{r}
+barplot(table(Brooklyn$PERP_AGE_GROUP), main="Distribution of Age of Perpetrator of Shootings in Brooklyn", col="lightblue")
+
+```
+<br>
+We can see that there are a lot of unknown ages and null values; however, when age is known, 18-24 year olds experienced the largest number of shootings in Brooklyn, followed by 25-44 year olds.There is also one erroneous age of 940 that could be removed or changed to Uknown since it is physically impossible to be 940 years old. 
+
+## Perpetrator Race 
+```{r}
+table(Brooklyn$PERP_RACE, useNA="ifany")
+```
+```{r, echo=FALSE}
+#Brooklyn %>% 
+  #filter (PERP_RACE, PERP_SEX) %>%
+  #complete(PERP_SEX, PERP_RACE) %>%
+  #table()
+```
+
+
+```{r, echo=FALSE}
+#Brooklyn %>%
+#  count(PERP_SEX, PERP_RACE) %>%
+#  table()
+```
+
+## Discussion
+
+1. Between 2006-2023, Brooklyn experience the highest number of shootings by NYC Boro.
+2. The majority of shootings were perpetrated by young, Black males when information about the perpetrator was known; However, there were 769 Unknown values, 467 Null values, and 4,281 blank values for Brooklyn shootings. 
+    + According to the 2010 census, 35.7% of the Brooklyn population was white, 31.9% Black, and 10.4% Asian. Since there is a higher proportion of white resides, we would maybe expect to see more white perpetrators. 
+    + Due to such a large number of unknown values, the data should be interpreted with extreme caution.
+    + Additional analysis could look at the longitude/latitude data to narrow in on specific areas where shootings occurred and analyze why these discrepancies exist. 
+3. These results are preliminary and it should be noted that these results do not imply causation. It is also important to note that the source of the dataset is from the police department, which historically has been known to target the Black population. As a person who has had negative interactions with police and government, I may be biased against believing the police; however, I attempted to mitigate that bias but presenting all the numbers and figures and not removing unknown values. 
+
+<br>
+
+
+```{r, echo=FALSE}
+#Boro_MOD<- Totals_by_Boro %>% mutate(BORO= as.factor(BORO))
+#mod<- lm(TOTAL_SHOOTINGS~poly(YEAR,2)*BORO, data=Boro_MOD)
+#summary(mod)
+```
+
